@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เช็คระยะทางคนขับ (Pro)</title>
+    <!-- นำเข้า Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- นำเข้า React และ ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- นำเข้า Babel สำหรับแปลง JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- นำเข้า Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #f3f4f6; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // --- เริ่มต้นส่วนของแอปพลิเคชัน ---
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [currentLocation, setCurrentLocation] = useState(null);
+            const [locationError, setLocationError] = useState('');
+            const [isLocating, setIsLocating] = useState(true);
+
+            const [searchQuery, setSearchQuery] = useState('');
+            const [isSearching, setIsSearching] = useState(false);
+            const [searchResults, setSearchResults] = useState([]);
+            
+            const [selectedDest, setSelectedDest] = useState(null);
+            const [routeInfo, setRouteInfo] = useState(null);
+            const [isCalculating, setIsCalculating] = useState(false);
+
+            useEffect(() => {
+                lucide.createIcons();
+                getUserLocation();
+            }, []);
+
+            useEffect(() => {
+                lucide.createIcons();
+            });
+
+            const getUserLocation = () => {
+                setIsLocating(true);
+                setLocationError('');
+                
+                if (!navigator.geolocation) {
+                    setLocationError('เบราว์เซอร์ของคุณไม่รองรับการระบุตำแหน่ง (GPS)');
+                    setIsLocating(false);
+                    return;
+                }
+
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        setCurrentLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+                        setIsLocating(false);
+                    },
+                    (error) => {
+                        let errorMsg = 'ไม่สามารถดึงตำแหน่งได้';
+                        if (error.code === 1) errorMsg = 'กรุณาอนุญาต GPS';
+                        if (error.code === 2) errorMsg = 'ไม่พบสัญญาณ GPS';
+                        if (error.code === 3) errorMsg = 'หมดเวลาเชื่อมต่อ GPS';
+                        setLocationError(errorMsg);
+                        setIsLocating(false);
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
+            };
+
+            const handleSearch = async (e) => {
+                e.preventDefault();
+                if (!searchQuery.trim()) return;
+
+                setIsSearching(true);
+                setSearchResults([]);
+                setSelectedDest(null);
+                setRouteInfo(null);
+
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&countrycodes=th&limit=5`);
+                    const data = await res.json();
+                    setSearchResults(data || []);
+                } catch (error) {
+                    alert('เกิดข้อผิดพลาดในการค้นหา');
+                } finally {
+                    setIsSearching(false);
+                }
+            };
+
+            const calculateDistance = async (destLat, destLng, destName) => {
+                if (!currentLocation) {
+                    alert('กรุณารอ GPS ก่อน');
+                    return;
+                }
+
+                setIsCalculating(true);
+                setSelectedDest({ lat: destLat, lng: destLng, name: destName });
+                setSearchResults([]); 
+
+                try {
+                    const start = `${currentLocation.lng},${currentLocation.lat}`;
+                    const end = `${destLng},${destLat}`;
+                    const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${start};${end}?overview=false&alternatives=true`);
+                    const data = await res.json();
+
+                    if (data.code === 'Ok' && data.routes.length > 0) {
+                        const routes = data.routes.map(r => ({
+                            distance: (r.distance / 1000).toFixed(1),
+                            duration: Math.round(r.duration / 60)
+                        }));
+                        setRouteInfo(routes);
+                    } else {
+                        alert('คำนวณเส้นทางไม่ได้');
+                    }
+                } catch (error) {
+                    alert('เกิดข้อผิดพลาดตอนคำนวณ');
+                } finally {
+                    setIsCalculating(false);
+                }
+            };
+
+            const openGoogleMaps = (avoidTolls) => {
+                if (currentLocation && selectedDest) {
+                    let url = `https://www.google.com/maps/dir/?api=1&origin=${currentLocation.lat},${currentLocation.lng}&destination=${selectedDest.lat},${selectedDest.lng}&travelmode=driving`;
+                    if (avoidTolls) url += '&avoid=tolls';
+                    window.open(url, '_blank');
+                }
+            };
+
+            return (
+                <div className="min-h-screen pb-10">
+                    <header className="bg-blue-700 text-white p-4 shadow-md sticky top-0 z-10 flex items-center gap-2">
+                        <i data-lucide="car"></i>
+                        <h1 className="text-xl font-bold">เช็คระยะทางคนขับ (Pro)</h1>
+                    </header>
+
+                    <main className="p-4 max-w-md mx-auto space-y-4">
+                        {/* Status Card */}
+                        <div className="bg-white rounded-xl shadow-sm p-4 border">
+                            <div className="flex justify-between mb-2">
+                                <h2 className="text-sm font-semibold text-gray-500 flex gap-1"><i data-lucide="crosshair" className="w-4 h-4"></i> ตำแหน่งของคุณ</h2>
+                                <button onClick={getUserLocation} className="text-blue-600 text-sm">รีเฟรช</button>
+                            </div>
+                            {isLocating ? <div className="text-blue-600">กำลังจับสัญญาณ...</div> 
+                            : locationError ? <div className="text-red-500">{locationError}</div> 
+                            : <div className="text-green-600 font-medium">ระบบพร้อมใช้งาน</div>}
+                        </div>
+
+                        {/* Search Card */}
+                        <div className="bg-white rounded-xl shadow-sm p-4 border">
+                            <h2 className="text-sm font-semibold text-gray-500 mb-3 flex gap-1"><i data-lucide="map-pin" className="w-4 h-4"></i> จุดหมาย</h2>
+                            <form onSubmit={handleSearch} className="flex gap-2">
+                                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="พิมพ์สถานที่..." className="flex-1 p-3 border rounded-lg" disabled={!currentLocation || isSearching} />
+                                <button type="submit" disabled={!currentLocation || !searchQuery.trim() || isSearching} className="bg-blue-600 text-white px-4 py-3 rounded-lg">
+                                    {isSearching ? '...' : <i data-lucide="search" className="w-5 h-5"></i>}
+                                </button>
+                            </form>
+                            {searchResults.length > 0 && (
+                                <div className="mt-3 border rounded-lg max-h-60 overflow-y-auto">
+                                    {searchResults.map((place, i) => (
+                                        <button key={i} onClick={() => calculateDistance(place.lat, place.lon, place.display_name)} className="w-full text-left p-3 hover:bg-gray-50 border-b text-sm">
+                                            {place.display_name}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Results Card */}
+                        {isCalculating ? <div className="text-center p-8 text-blue-500">กำลังคำนวณ...</div> 
+                        : routeInfo ? (
+                            <div className="bg-white rounded-xl shadow-md border overflow-hidden">
+                                <div className="bg-gray-50 p-4 border-b">
+                                    <p className="text-sm font-bold truncate">{selectedDest.name}</p>
+                                </div>
+                                <div className="p-4 space-y-3">
+                                    {routeInfo.map((route, i) => (
+                                        <div key={i} className={`p-3 rounded-lg border ${i === 0 ? 'bg-blue-50 border-blue-200' : ''}`}>
+                                            <p className="text-sm font-bold mb-1">{i === 0 ? 'เส้นทางแนะนำ' : `ทางเลือก ${i}`}</p>
+                                            <div className="flex gap-4 text-sm">
+                                                <span>{route.distance} กม.</span>
+                                                <span>{route.duration} นาที</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="p-4 grid grid-cols-2 gap-3 border-t">
+                                    <button onClick={() => openGoogleMaps(true)} className="bg-orange-500 text-white py-3 rounded-xl">เลี่ยงทางด่วน</button>
+                                    <button onClick={() => openGoogleMaps(false)} className="bg-green-600 text-white py-3 rounded-xl">ขึ้นทางด่วน</button>
+                                </div>
+                            </div>
+                        ) : null}
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
