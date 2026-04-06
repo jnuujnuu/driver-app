@@ -136,38 +136,32 @@
                 setSearchResults([]);
                 setSelectedDest(null);
                 setRouteInfo(null);
-                setSearchMessage(''); // ล้างข้อความเก่าก่อนค้นหาใหม่
+                setSearchMessage('');
 
                 try {
-                    // --- เปลี่ยนมาระบบ Photon API เพื่อรองรับภาษาไทย และหาสถานที่ใกล้ตัวก่อน ---
-                    // ส่ง lat, lon ปัจจุบันไปด้วย เพื่อให้มันโฟกัสสถานที่รอบๆ รถเราก่อน
-                    let url = `https://photon.komoot.io/api/?q=${encodeURIComponent(searchQuery)}&limit=8`;
+                    // --- เปลี่ยนระบบค้นหาเป็น ArcGIS ซึ่งฉลาดและรองรับไทย/อังกฤษ ได้ดีกว่ามาก ---
+                    // ส่งตำแหน่งปัจจุบันไปด้วยเพื่อให้หาร้านหรือสถานที่ที่อยู่ใกล้เราก่อน
+                    let url = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=${encodeURIComponent(searchQuery)}&maxLocations=8&countryCode=TH`;
                     if (currentLocation) {
-                        url += `&lat=${currentLocation.lat}&lon=${currentLocation.lng}`;
+                        url += `&location=${currentLocation.lng},${currentLocation.lat}`;
                     }
 
                     const res = await fetch(url);
                     const data = await res.json();
                     
-                    if (data && data.features && data.features.length > 0) {
-                        const mappedResults = data.features.map(f => {
-                            const p = f.properties;
-                            // นำข้อมูลต่างๆ มาต่อกันเป็นชื่อสถานที่ (ชื่อ, ถนน, ตำบล/แขวง, จังหวัด)
-                            const nameParts = [p.name, p.street, p.district, p.city, p.state].filter(Boolean);
-                            // ตัดข้อมูลที่ซ้ำกันออก
-                            const displayName = Array.from(new Set(nameParts)).join(', ');
-                            
+                    if (data && data.candidates && data.candidates.length > 0) {
+                        const mappedResults = data.candidates.map(c => {
                             return {
-                                lat: f.geometry.coordinates[1],
-                                lon: f.geometry.coordinates[0],
-                                display_name: displayName || 'สถานที่ (ไม่มีชื่อระบุ)'
+                                lat: c.location.y,
+                                lon: c.location.x,
+                                // ArcGIS จะส่งชื่อสถานที่แบบเต็มมาในฟิลด์ address
+                                display_name: c.address
                             };
                         });
                         
                         setSearchResults(mappedResults);
                     } else {
-                        // กรณีหาไม่เจอ
-                        setSearchMessage('ไม่พบสถานที่ ลองพิมพ์ชื่อ ตำบล, อำเภอ หรือ ถนน เพิ่มเข้าไปครับ');
+                        setSearchMessage('ไม่พบสถานที่ ลองพิมพ์ชื่อให้ละเอียดขึ้น (เช่น ใส่ชื่อเขต หรือ จังหวัด)');
                     }
                 } catch (error) {
                     setSearchMessage('เกิดข้อผิดพลาดในการเชื่อมต่ออินเทอร์เน็ตเพื่อค้นหา');
