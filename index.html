@@ -139,14 +139,34 @@
                 setSearchMessage(''); // ล้างข้อความเก่าก่อนค้นหาใหม่
 
                 try {
-                    // เพิ่ม accept-language=th เพื่อให้ค้นหาภาษาไทยได้ดีขึ้น
-                    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&countrycodes=th&limit=5&accept-language=th`);
+                    // --- เปลี่ยนมาระบบ Photon API เพื่อรองรับภาษาไทย และหาสถานที่ใกล้ตัวก่อน ---
+                    // ส่ง lat, lon ปัจจุบันไปด้วย เพื่อให้มันโฟกัสสถานที่รอบๆ รถเราก่อน
+                    let url = `https://photon.komoot.io/api/?q=${encodeURIComponent(searchQuery)}&limit=8`;
+                    if (currentLocation) {
+                        url += `&lat=${currentLocation.lat}&lon=${currentLocation.lng}`;
+                    }
+
+                    const res = await fetch(url);
                     const data = await res.json();
                     
-                    if (data && data.length > 0) {
-                        setSearchResults(data);
+                    if (data && data.features && data.features.length > 0) {
+                        const mappedResults = data.features.map(f => {
+                            const p = f.properties;
+                            // นำข้อมูลต่างๆ มาต่อกันเป็นชื่อสถานที่ (ชื่อ, ถนน, ตำบล/แขวง, จังหวัด)
+                            const nameParts = [p.name, p.street, p.district, p.city, p.state].filter(Boolean);
+                            // ตัดข้อมูลที่ซ้ำกันออก
+                            const displayName = Array.from(new Set(nameParts)).join(', ');
+                            
+                            return {
+                                lat: f.geometry.coordinates[1],
+                                lon: f.geometry.coordinates[0],
+                                display_name: displayName || 'สถานที่ (ไม่มีชื่อระบุ)'
+                            };
+                        });
+                        
+                        setSearchResults(mappedResults);
                     } else {
-                        // กรณี API ส่งข้อมูลกลับมาเป็นค่าว่าง (ไม่พบสถานที่)
+                        // กรณีหาไม่เจอ
                         setSearchMessage('ไม่พบสถานที่ ลองพิมพ์ชื่อ ตำบล, อำเภอ หรือ ถนน เพิ่มเข้าไปครับ');
                     }
                 } catch (error) {
@@ -208,11 +228,13 @@
                         <div className="bg-white rounded-xl shadow-sm p-4 border">
                             <div className="flex justify-between mb-2">
                                 <h2 className="text-sm font-semibold text-gray-500 flex gap-1"><i data-lucide="crosshair" className="w-4 h-4"></i> ตำแหน่งของคุณ</h2>
-                                <button onClick={getUserLocation} className="text-blue-600 text-sm">รีเฟรช</button>
+                                <button onClick={getUserLocation} className="text-blue-600 text-sm font-bold">รีเฟรช</button>
                             </div>
                             {isLocating ? <div className="text-blue-600">กำลังจับสัญญาณ...</div> 
                             : locationError ? <div className="text-red-500">{locationError}</div> 
-                            : <div className="text-green-600 font-medium">ระบบพร้อมใช้งาน</div>}
+                            : <div className="text-green-600 font-medium flex items-center gap-2">
+                                <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse"></div>ระบบพร้อมใช้งาน
+                              </div>}
                         </div>
 
                         {/* Search Card */}
@@ -247,8 +269,9 @@
                             {searchResults.length > 0 && (
                                 <div className="mt-3 border rounded-lg max-h-60 overflow-y-auto">
                                     {searchResults.map((place, i) => (
-                                        <button key={i} onClick={() => calculateDistance(place.lat, place.lon, place.display_name)} className="w-full text-left p-3 hover:bg-gray-50 border-b text-sm">
-                                            {place.display_name}
+                                        <button key={i} onClick={() => calculateDistance(place.lat, place.lon, place.display_name)} className="w-full text-left p-3 hover:bg-blue-50 active:bg-blue-100 border-b text-sm transition-colors flex items-start gap-2">
+                                            <i data-lucide="map-pin" className="w-4 h-4 text-gray-400 mt-0.5 shrink-0"></i>
+                                            <span className="text-gray-700">{place.display_name}</span>
                                         </button>
                                     ))}
                                 </div>
@@ -266,16 +289,16 @@
                                     {routeInfo.map((route, i) => (
                                         <div key={i} className={`p-3 rounded-lg border ${i === 0 ? 'bg-blue-50 border-blue-200' : ''}`}>
                                             <p className="text-sm font-bold mb-1">{i === 0 ? 'เส้นทางแนะนำ' : `ทางเลือก ${i}`}</p>
-                                            <div className="flex gap-4 text-sm">
-                                                <span>{route.distance} กม.</span>
-                                                <span>{route.duration} นาที</span>
+                                            <div className="flex gap-4 text-sm font-medium">
+                                                <span className="text-blue-700">{route.distance} กม.</span>
+                                                <span className="text-orange-600">{route.duration} นาที</span>
                                             </div>
                                         </div>
                                     ))}
                                 </div>
                                 <div className="p-4 grid grid-cols-2 gap-3 border-t">
-                                    <button onClick={() => openGoogleMaps(true)} className="bg-orange-500 text-white py-3 rounded-xl">เลี่ยงทางด่วน</button>
-                                    <button onClick={() => openGoogleMaps(false)} className="bg-green-600 text-white py-3 rounded-xl">ขึ้นทางด่วน</button>
+                                    <button onClick={() => openGoogleMaps(true)} className="bg-orange-500 text-white py-3 rounded-xl font-bold">เลี่ยงทางด่วน</button>
+                                    <button onClick={() => openGoogleMaps(false)} className="bg-green-600 text-white py-3 rounded-xl font-bold">ขึ้นทางด่วน</button>
                                 </div>
                             </div>
                         ) : null}
@@ -286,7 +309,7 @@
                         <div className="fixed inset-0 z-50 bg-white flex flex-col">
                             <div className="bg-blue-700 text-white p-4 flex justify-between items-center shadow-md">
                                 <h2 className="font-bold flex items-center gap-2"><i data-lucide="map-pin"></i> เลื่อนหมุดไปที่จุดหมาย</h2>
-                                <button onClick={() => setShowMap(false)} className="text-white bg-blue-800 hover:bg-blue-900 p-2 rounded-lg">
+                                <button onClick={() => setShowMap(false)} className="text-white bg-blue-800 hover:bg-blue-900 px-3 py-1.5 rounded-lg font-bold">
                                     ปิด X
                                 </button>
                             </div>
