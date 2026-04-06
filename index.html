@@ -13,6 +13,11 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- นำเข้า Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- นำเข้าระบบแผนที่ (Leaflet) เพิ่มเติมตรงนี้ -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <style>
         body { font-family: 'Sarabun', sans-serif; background-color: #f3f4f6; }
     </style>
@@ -38,10 +43,10 @@
             const [routeInfo, setRouteInfo] = useState(null);
             const [isCalculating, setIsCalculating] = useState(false);
 
-            useEffect(() => {
-                lucide.createIcons();
-                getUserLocation();
-            }, []);
+            // --- ตัวแปรสำหรับคุมหน้าต่างแผนที่ ---
+            const [showMap, setShowMap] = useState(false);
+            const mapContainerRef = React.useRef(null);
+            const selectedLatLngRef = React.useRef(null);
 
             useEffect(() => {
                 lucide.createIcons();
@@ -72,6 +77,55 @@
                     },
                     { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
                 );
+            };
+
+            // --- ระบบจัดการเปิดแผนที่ และ ปักหมุด ---
+            useEffect(() => {
+                if (showMap && mapContainerRef.current) {
+                    // แก้ไขพาทรูปไอคอนหมุด
+                    L.Icon.Default.imagePath = 'https://unpkg.com/leaflet@1.9.4/dist/images/';
+                    
+                    const map = L.map(mapContainerRef.current).setView([currentLocation.lat, currentLocation.lng], 15);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '© OpenStreetMap'
+                    }).addTo(map);
+
+                    const marker = L.marker([currentLocation.lat, currentLocation.lng], { draggable: true }).addTo(map);
+                    selectedLatLngRef.current = { lat: currentLocation.lat, lng: currentLocation.lng };
+
+                    marker.on('dragend', function () {
+                        selectedLatLngRef.current = marker.getLatLng();
+                    });
+
+                    map.on('click', function(e) {
+                        marker.setLatLng(e.latlng);
+                        selectedLatLngRef.current = e.latlng;
+                    });
+
+                    // รอให้แผนที่กางเต็มจอก่อนค่อยโหลดภาพ
+                    setTimeout(() => { map.invalidateSize(); }, 200);
+
+                    return () => map.remove();
+                }
+            }, [showMap]);
+
+            // เมื่อกดปุ่ม "ยืนยันตำแหน่งนี้"
+            const handleConfirmMap = async () => {
+                if (!selectedLatLngRef.current) return;
+                const { lat, lng } = selectedLatLngRef.current;
+                setShowMap(false);
+                setIsCalculating(true);
+                setSelectedDest({ lat, lng, name: 'พิกัดที่เลือกจากแผนที่...' });
+
+                try {
+                    // แปลงพิกัดกลับเป็นชื่อสถานที่คร่าวๆ
+                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=th`);
+                    const data = await res.json();
+                    const destName = data.display_name || 'ตำแหน่งที่ปักหมุดเอง';
+                    calculateDistance(lat, lng, destName);
+                } catch (e) {
+                    calculateDistance(lat, lng, 'ตำแหน่งที่ปักหมุดเอง');
+                }
             };
 
             const handleSearch = async (e) => {
@@ -171,6 +225,18 @@
                                 </button>
                             </form>
                             
+                            {/* เพิ่มปุ่มสำหรับเปิดแผนที่ตรงนี้ */}
+                            <div className="mt-4 text-center border-t pt-3">
+                                <span className="text-sm text-gray-400 block mb-2">หรือ</span>
+                                <button 
+                                    onClick={() => currentLocation ? setShowMap(true) : alert('กรุณารอ GPS ตำแหน่งปัจจุบันก่อนครับ')}
+                                    className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-lg border border-gray-300 flex items-center justify-center gap-2 transition-colors font-semibold"
+                                >
+                                    <i data-lucide="map" className="w-5 h-5 text-blue-600"></i>
+                                    ปักหมุดจุดหมายจากแผนที่ด้วยตัวเอง
+                                </button>
+                            </div>
+
                             {/* แสดงข้อความเตือนเมื่อค้นหาไม่เจอ */}
                             {searchMessage && (
                                 <div className="mt-3 p-3 bg-yellow-50 text-yellow-700 text-sm rounded-lg border border-yellow-200">
@@ -214,6 +280,34 @@
                             </div>
                         ) : null}
                     </main>
+
+                    {/* หน้าต่างแผนที่เต็มจอ (จะโผล่มาเมื่อกดปุ่มปักหมุด) */}
+                    {showMap && (
+                        <div className="fixed inset-0 z-50 bg-white flex flex-col">
+                            <div className="bg-blue-700 text-white p-4 flex justify-between items-center shadow-md">
+                                <h2 className="font-bold flex items-center gap-2"><i data-lucide="map-pin"></i> เลื่อนหมุดไปที่จุดหมาย</h2>
+                                <button onClick={() => setShowMap(false)} className="text-white bg-blue-800 hover:bg-blue-900 p-2 rounded-lg">
+                                    ปิด X
+                                </button>
+                            </div>
+                            <div className="bg-yellow-50 p-2 text-center text-sm text-yellow-800 border-b border-yellow-200 shadow-inner">
+                                แตะที่แผนที่ หรือ ลากหมุดสีน้ำเงิน เพื่อเลือกตำแหน่งผู้โดยสาร
+                            </div>
+                            
+                            {/* กล่องแสดงแผนที่ Leaflet */}
+                            <div ref={mapContainerRef} className="flex-1 w-full relative z-0"></div>
+                            
+                            <div className="p-4 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] relative z-10">
+                                <button 
+                                    onClick={handleConfirmMap} 
+                                    className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold py-4 rounded-xl shadow-md text-lg"
+                                >
+                                    ยืนยันตำแหน่งนี้
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                 </div>
             );
         }
